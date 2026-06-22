@@ -18,12 +18,8 @@ Kuba is a two-player strategy game designed by Serge Cahu played on a 7x7 board.
   * Killer Moves & Countermove Heuristic.
   * Search Extensions based on push-threat gains and tactical captures.
   
-### NNUE Evaluation (RedRacer Architecture)
-Kahu uses a custom NNUE architecture specifically designed for the rules of Kuba:
-* **Bucketing:** 17 Material Phase buckets (push-complexity) and 16 Output buckets (red-race margin).
-* **Feature Set:** `BOARD_SQ * 3` pieces (Own, Opponent, Red) utilizing a Column-major gravity index (push-oriented squares).
-* **Push-Clash Head:** Custom duel-bucket differentials measuring mobility and push-off threats.
-* **Topology:** `(Features) -> 256 -> 32 -> 1` with clipped ReLUs and a linear skip-connection bypass.
+### NNUE Evaluation (ClashTower Architecture)
+Kahu uses a custom NNUE architecture specifically designed for the rules of Kuba.
 
 ### Built-in NNUE Trainer
 * Written in C++ with no external dependencies.
