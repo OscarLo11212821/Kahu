@@ -11,10 +11,10 @@ public:
     static constexpr const char* PROTOCOL_ID = "kpp";
     static constexpr int PROTOCOL_VERSION = 1;
     static constexpr const char* ENGINE_NAME = "Kahu";
-    static constexpr const char* ENGINE_VERSION = "19";
+    static constexpr const char* ENGINE_VERSION = "20";
     static constexpr const char* ENGINE_AUTHOR = "OscarLo11212821";
 
-    explicit Protocol(const std::string& nnue_path = "kuba.nnue");
+    explicit Protocol(const std::string& nnue_path = "clashtower.nnue");
     void loop();
 
 private:

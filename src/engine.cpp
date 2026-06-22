@@ -4,6 +4,11 @@
 #include <bit>
 #include <iostream>
 
+struct MoveList {
+    Move buf[128];
+    int n = 0;
+};
+
 static int adj_sq(int sq, int dir) {
     if (dir == NORTH) return (sq >= 7) ? sq - 7 : -1;
     if (dir == SOUTH) return (sq <= 41) ? sq + 7 : -1;
@@ -17,6 +22,19 @@ static Color color_at(const Position& pos, int sq) {
     if (pos.bitboards[BLACK] & (1ULL << sq)) return BLACK;
     if (pos.bitboards[RED] & (1ULL << sq)) return RED;
     return EMPTY;
+}
+
+static void gen_moves(const Position& pos, MoveList& ml) {
+    ml.n = 0;
+    uint64_t my_pieces = pos.bitboards[pos.side_to_move];
+    while (my_pieces) {
+        int sq = std::countr_zero(my_pieces);
+        my_pieces &= my_pieces - 1;
+        for (int dir = 0; dir < 4; dir++) {
+            Position next = pos;
+            if (next.do_move(sq, dir)) ml.buf[ml.n++] = {(uint8_t)sq, (uint8_t)dir};
+        }
+    }
 }
 
 static int push_off_threats(const Position& pos, Color side) {
@@ -64,11 +82,19 @@ static int tactical_value(const Position& pos, const Position& next) {
     return val;
 }
 
+static int push_see(const Position& pos, Move m) {
+    Position next = pos;
+    next.do_move(m.sq, m.dir);
+    return tactical_value(pos, next);
+}
+
 Engine::Engine() : tt(TT_SIZE) {
     std::memset(killer_moves, 0, sizeof(killer_moves));
     std::memset(countermoves, 0, sizeof(countermoves));
     std::memset(history, 0, sizeof(history));
     std::memset(continuation, 0, sizeof(continuation));
+    std::memset(capture_history, 0, sizeof(capture_history));
+    std::memset(threat_history, 0, sizeof(threat_history));
 }
 
 Move Engine::best_from_tt(const Position& pos) const {
@@ -85,8 +111,9 @@ Move Engine::best_from_tt(const Position& pos) const {
     }
     if (best.sq != 255) return best;
 
-    std::vector<Move> moves = pos.generate_legal_moves();
-    if (!moves.empty()) return moves[0];
+    MoveList ml;
+    gen_moves(pos, ml);
+    if (ml.n > 0) return ml.buf[0];
     return {255, 255};
 }
 
@@ -105,6 +132,8 @@ void Engine::clear_heuristics() {
     for (int i = 0; i < 64; i++) {
         for (int j = 0; j < 256; j++) {
             history[i][j] /= 2;
+            capture_history[i][j] /= 2;
+            threat_history[i][j] /= 2;
         }
     }
     for (int i = 0; i < 256; i++) {
@@ -162,7 +191,8 @@ int Engine::qsearch(Position pos, int alpha, int beta, int ply, int qdepth) {
 
     if (qdepth >= 16) return alpha;
 
-    std::vector<Move> moves = pos.generate_legal_moves();
+    MoveList ml;
+    gen_moves(pos, ml);
 
     struct ScoredMove { Move m; int score; };
     ScoredMove scored[128];
@@ -171,13 +201,16 @@ int Engine::qsearch(Position pos, int alpha, int beta, int ply, int qdepth) {
     Color me = pos.side_to_move;
     int my_threats = push_off_threats(pos, me);
 
-    for (Move m : moves) {
+    for (int i = 0; i < ml.n; i++) {
+        Move m = ml.buf[i];
         Position next = pos;
         next.do_move(m.sq, m.dir);
         bool tact = is_tactical(pos, next);
         int threat_gain = push_off_threats(next, me) - my_threats;
         if (!tact && threat_gain <= 0) continue;
-        int prio = tactical_value(pos, next) + threat_gain * 80;
+
+        int see = push_see(pos, m);
+        int prio = see + threat_gain * 80 + capture_history[m.sq][m.dir] + threat_history[m.sq][m.dir];
         scored[count++] = {m, prio};
     }
 
@@ -189,7 +222,10 @@ int Engine::qsearch(Position pos, int alpha, int beta, int ply, int qdepth) {
 
         Position next = pos;
         next.do_move(scored[i].m.sq, scored[i].m.dir);
-        int ext = (next.captured_red[pos.side_to_move] > pos.captured_red[pos.side_to_move]) ? 1 : 0;
+        int tg = push_off_threats(next, me) - my_threats;
+        int ext = 0;
+        if (next.captured_red[me] > pos.captured_red[me]) ext = 1;
+        if (tg >= 2) ext = 1;
         int score = -qsearch(next, -beta, -alpha, ply + 1, qdepth + 1 + ext);
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;
@@ -207,6 +243,7 @@ SearchResult Engine::search_depth_ex(const Position& pos, int max_depth, bool qu
     clear_heuristics();
     nnue_clear_eval_cache();
     current_age++;
+    root_move_ = {255, 255};
 
     SearchResult result;
     int score = 0;
@@ -220,6 +257,10 @@ SearchResult Engine::search_depth_ex(const Position& pos, int max_depth, bool qu
         if (d >= 8 && std::abs(score) < INF - 2000) {
             alpha = std::max(-INF - 1, score - delta);
             beta = std::min(INF + 1, score + delta);
+        }
+
+        if (d >= 5 && root_move_.sq == 255) {
+            pvs(pos, std::max(1, d - 3), alpha, beta, 0);
         }
 
         while (true) {
@@ -238,6 +279,7 @@ SearchResult Engine::search_depth_ex(const Position& pos, int max_depth, bool qu
         if (time_over) break;
 
         result.move = best_from_tt(pos);
+        root_move_ = result.move;
         result.score = score;
         completed_depth = d;
 
@@ -268,6 +310,7 @@ SearchResult Engine::search_time_ex(const Position& pos, int time_ms, bool quiet
     nodes = 0;
     nnue_clear_eval_cache();
     current_age++;
+    root_move_ = {255, 255};
 
     SearchResult result;
     int score = 0;
@@ -283,6 +326,10 @@ SearchResult Engine::search_time_ex(const Position& pos, int time_ms, bool quiet
         if (d >= 3 && std::abs(score) < INF - 2000) {
             alpha = std::max(-INF - 1, score - delta);
             beta = std::min(INF + 1, score + delta);
+        }
+
+        if (d >= 5 && root_move_.sq == 255) {
+            pvs(pos, std::max(1, d - 3), alpha, beta, 0);
         }
 
         while (true) {
@@ -304,6 +351,7 @@ SearchResult Engine::search_time_ex(const Position& pos, int time_ms, bool quiet
         }
 
         result.move = best_from_tt(pos);
+        root_move_ = result.move;
         result.score = score;
         completed_depth = d;
 
@@ -368,30 +416,49 @@ int Engine::pvs(Position pos, int depth, int alpha, int beta, int ply, Move prev
         if (tte->flag == TT_BETA && tt_score >= beta) return tt_score;
     }
 
-    std::vector<Move> moves = pos.generate_legal_moves();
+    MoveList ml;
+    gen_moves(pos, ml);
+    int move_count = ml.n;
 
-    struct ScoredMove { Move m; int score; };
+    if (move_count == 0) return -INF + ply;
+
+    int static_eval = evaluate(pos);
+    if (depth <= 3 && ply > 0) {
+        if (static_eval + 200 * depth <= alpha)
+            return qsearch(pos, alpha, beta, ply);
+        if (depth <= 2 && static_eval - 180 * depth >= beta)
+            return beta;
+    }
+
+    struct ScoredMove { Move m; int score; int see; bool tact; int threat_gain; int opp_threat_drop; };
     ScoredMove scored_moves[128];
-    int move_count = 0;
 
     Color me = pos.side_to_move;
     Color opp = (me == WHITE) ? BLACK : WHITE;
     const int base_threats = push_off_threats(pos, me);
     const int base_opp_threats = push_off_threats(pos, opp);
 
-    for (Move m : moves) {
+    for (int i = 0; i < move_count; i++) {
+        Move m = ml.buf[i];
+
         Position next = pos;
         next.do_move(m.sq, m.dir);
+        const int threat_gain = push_off_threats(next, me) - base_threats;
         int m_score = history[m.sq][m.dir];
-        if (tte && m == tte->best_move) m_score = 1000000;
+        if (ply == 0 && m == root_move_) m_score = 1100000;
+        else if (tte && m == tte->best_move) m_score = 1000000;
         else if (m == killer_moves[k_ply][0]) m_score = 900000;
         else if (m == killer_moves[k_ply][1]) m_score = 800000;
         else if (prev.sq != 255 && m == countermoves[prev.sq][prev.dir]) m_score = 750000;
-        else if (is_tactical(pos, next)) m_score = 500000 + tactical_value(pos, next);
+        else if (is_tactical(pos, next)) {
+            int see = push_see(pos, m);
+            m_score = 500000 + see * 64 + tactical_value(pos, next) + capture_history[m.sq][m.dir];
+        }
+        else if (threat_gain >= 1) m_score += threat_history[m.sq][m.dir];
         else if (prev.sq != 255) m_score += continuation[move_pack(prev)][move_pack(m)];
-        const int threat_gain = push_off_threats(next, me) - base_threats;
+        const int opp_threat_drop = base_opp_threats - push_off_threats(next, opp);
         m_score += std::max(0, threat_gain * 48);
-        scored_moves[move_count++] = {m, m_score};
+        scored_moves[i] = {m, m_score, push_see(pos, m), is_tactical(pos, next), threat_gain, opp_threat_drop};
     }
 
     int best_score = -INF - 1;
@@ -409,14 +476,27 @@ int Engine::pvs(Position pos, int depth, int alpha, int beta, int ply, Move prev
         Position next = pos;
         next.do_move(m.sq, m.dir);
 
-        bool is_tact = is_tactical(pos, next);
+        bool is_tact = scored_moves[i].tact;
         bool is_killer = (m == killer_moves[k_ply][0] || m == killer_moves[k_ply][1]);
-        int threat_gain = push_off_threats(next, me) - base_threats;
-        int opp_threat_drop = base_opp_threats - push_off_threats(next, opp);
+        int threat_gain = scored_moves[i].threat_gain;
+        int opp_threat_drop = scored_moves[i].opp_threat_drop;
         int ext = 0;
         if (extensions < 2 && (is_tact || threat_gain >= 2)) ext = 1;
+        if (extensions < 2 && opp_threat_drop >= 2) ext = 1;
+        if (extensions < 2 && base_opp_threats >= 3) ext = 1;
+        if (extensions < 2 && next.captured_red[me] > pos.captured_red[me]) ext = 1;
         int new_depth = depth - 1 + ext;
         int score;
+
+        if (depth <= 4 && moves_searched > 0 && !is_tact && threat_gain < 1 && opp_threat_drop < 1
+            && scored_moves[i].see <= 0
+            && static_eval + 110 * depth + scored_moves[i].see < alpha) {
+            continue;
+        }
+        if (depth <= 7 && moves_searched >= 3 + depth * depth && !is_tact && threat_gain < 1
+            && opp_threat_drop < 1 && scored_moves[i].see <= 0) {
+            continue;
+        }
 
         if (moves_searched == 0) {
             score = -pvs(next, new_depth, -beta, -alpha, ply + 1, m, extensions + ext);
@@ -424,7 +504,7 @@ int Engine::pvs(Position pos, int depth, int alpha, int beta, int ply, Move prev
             int R = 0;
             bool is_counter = prev.sq != 255 && m == countermoves[prev.sq][prev.dir];
             if (depth >= 5 && ply > 0 && moves_searched >= 4 && !is_tact && !is_killer && !is_counter
-                && threat_gain < 1 && opp_threat_drop < 1) {
+                && threat_gain < 1 && opp_threat_drop < 1 && scored_moves[i].see <= 0) {
                 R = 1;
             }
 
@@ -461,6 +541,21 @@ int Engine::pvs(Position pos, int depth, int alpha, int beta, int ply, Move prev
                     for (int r = 0; r < 64; r++)
                         for (int c = 0; c < 256; c++)
                             history[r][c] >>= 1;
+                }
+            } else {
+                capture_history[m.sq][m.dir] += depth * depth;
+                if (capture_history[m.sq][m.dir] > 16384) {
+                    for (int r = 0; r < 64; r++)
+                        for (int c = 0; c < 256; c++)
+                            capture_history[r][c] >>= 1;
+                }
+            }
+            if (threat_gain >= 2) {
+                threat_history[m.sq][m.dir] += depth * depth;
+                if (threat_history[m.sq][m.dir] > 16384) {
+                    for (int r = 0; r < 64; r++)
+                        for (int c = 0; c < 256; c++)
+                            threat_history[r][c] >>= 1;
                 }
             }
             break;
@@ -536,6 +631,7 @@ SearchResult Engine::search_endless_ex(const Position& pos, bool quiet) {
     clear_heuristics();
     nnue_clear_eval_cache();
     current_age++;
+    root_move_ = {255, 255};
 
     SearchResult result;
     int score = 0;
@@ -569,6 +665,7 @@ SearchResult Engine::search_endless_ex(const Position& pos, bool quiet) {
         if (time_over) break;
 
         result.move = best_from_tt(pos);
+        root_move_ = result.move;
         result.score = score;
         completed_depth = d;
 

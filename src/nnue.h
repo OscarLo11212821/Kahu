@@ -29,7 +29,7 @@ private:
     static constexpr int FEATURES_PER_MATERIAL_V1 = PIECE_FEATURES + CAP_FEATURES + CAP_FEATURES + 1;
     static constexpr int BIAS_FEATURE_V1 = PIECE_FEATURES + 2 * CAP_FEATURES;
 
-    // V3 (RedRacer): push-duel aux features + push-clash head
+    // V3 (ClashTower): push-duel aux features, parallel perspective MLP + clash skip head
     static constexpr int DUEL_BUCKETS = 8;
     static constexpr int FEATURES_PER_MATERIAL_V3 = PIECE_FEATURES + DUEL_BUCKETS + DUEL_BUCKETS + 1;
     static constexpr int PUSH_THREAT_OFF = PIECE_FEATURES;

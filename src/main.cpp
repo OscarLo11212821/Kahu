@@ -8,7 +8,7 @@
 int main(int argc, char** argv) {
     Zobrist::init();
 
-    std::string net_path = "kuba.nnue";
+    std::string net_path = "clashtower.nnue";
     bool datagen_mode = false;
 
     for (int i = 1; i < argc; ++i) {

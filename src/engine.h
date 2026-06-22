@@ -61,11 +61,15 @@ private:
     Move countermoves[64][4];
     int history[64][256];
     int continuation[256][256];
+    int capture_history[64][256];
+    int threat_history[64][256];
+    Move root_move_ = {255, 255};
 
     static int move_pack(Move m) { return m.sq * 4 + m.dir; }
 
     int evaluate(const Position& pos);
-    int pvs(Position pos, int depth, int alpha, int beta, int ply, Move prev = {255, 255}, int extensions = 0);
+    int pvs(Position pos, int depth, int alpha, int beta, int ply,
+            Move prev = {255, 255}, int extensions = 0);
     int qsearch(Position pos, int alpha, int beta, int ply, int qdepth = 0);
 
     void check_time();

@@ -670,10 +670,10 @@ float NnueNetwork::forward_head_v3(const float* us_act, const float* them_act, f
     const float* w2_b = w2.data() + off2;
 
     for (int i = 0; i < H; ++i) {
-        simd_w2_accum(z2, duel_adv[i], w2_b + static_cast<size_t>(i) * static_cast<size_t>(H2), H2);
+        simd_w2_accum(z2, us_act[i], w2_b + static_cast<size_t>(i) * static_cast<size_t>(H2), H2);
     }
     for (int i = 0; i < H; ++i) {
-        simd_w2_accum(z2, duel_field[i], w2_b + static_cast<size_t>(H + i) * static_cast<size_t>(H2), H2);
+        simd_w2_accum(z2, them_act[i], w2_b + static_cast<size_t>(H + i) * static_cast<size_t>(H2), H2);
     }
 
     simd_clip_relu_sq(h2, z2, reluCap, H2);

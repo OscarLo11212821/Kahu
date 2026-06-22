@@ -21,6 +21,7 @@ public:
 
     bool do_move(int sq, int dir);
     std::vector<Move> generate_legal_moves() const;
+    bool has_legal_moves() const;
     Color get_winner() const; 
     void print() const;
 

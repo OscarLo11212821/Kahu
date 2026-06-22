@@ -124,12 +124,25 @@ std::vector<Move> Position::generate_legal_moves() const {
     return moves;
 }
 
+bool Position::has_legal_moves() const {
+    uint64_t my_pieces = bitboards[side_to_move];
+    while (my_pieces) {
+        int sq = std::countr_zero(my_pieces);
+        my_pieces &= my_pieces - 1;
+        for (int dir = 0; dir < 4; ++dir) {
+            Position next = *this;
+            if (next.do_move(sq, dir)) return true;
+        }
+    }
+    return false;
+}
+
 Color Position::get_winner() const {
     if (captured_red[WHITE] >= 7) return WHITE;
     if (captured_red[BLACK] >= 7) return BLACK;
     if (bitboards[WHITE] == 0) return BLACK;
     if (bitboards[BLACK] == 0) return WHITE;
-    if (generate_legal_moves().empty()) return (side_to_move == WHITE) ? BLACK : WHITE;
+    if (!has_legal_moves()) return (side_to_move == WHITE) ? BLACK : WHITE;
     return EMPTY;
 }
 
